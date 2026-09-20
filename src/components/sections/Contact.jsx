@@ -128,7 +128,10 @@ export default function Contact() {
             </header>
 
             {/* Accessible Contact Form */}
-            <ContactForm recipientEmail={contactData.email} />
+            <ContactForm
+              recipientEmail={contactData.email}
+              formspreeEndpoint={contactData.formspreeEndpoint}
+            />
           </div>
 
           {/* Right Column (5 cols): Contact Details, Status & Specimen */}

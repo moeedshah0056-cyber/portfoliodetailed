@@ -12,6 +12,7 @@ export const contactData = {
     "Have a project, idea, or interface that needs a frontend perspective? Start the conversation and share what you're working on.",
   availabilityLabel: "OPEN TO CONVERSATIONS",
   email: "YOUR_EMAIL_HERE",
+  formspreeEndpoint: "https://formspree.io/f/mppwpqwy",
   socialLinks: [
     {
       label: "GitHub",

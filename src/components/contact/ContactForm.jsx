@@ -1,15 +1,16 @@
 import { useState } from 'react'
-import { ArrowUpRight, AlertCircle, Copy, Check } from 'lucide-react'
+import { ArrowUpRight, AlertCircle, Copy, Check, Send } from 'lucide-react'
 
 /**
  * ContactForm Component
  * 
  * Minimal, accessible 3-field editorial form:
- * - Full client-side validation
+ * - Full client-side validation (Name, Email, Message)
  * - Accessible error handling (aria-invalid, aria-describedby, role="alert")
- * - Honest, frontend-safe submission handling without simulating fake server delivery
+ * - Connected to real Formspree endpoint (or safe fallback if endpoint is unset)
+ * - Preserves drafted content on any network error
  */
-export default function ContactForm({ recipientEmail }) {
+export default function ContactForm({ recipientEmail, formspreeEndpoint }) {
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -17,7 +18,8 @@ export default function ContactForm({ recipientEmail }) {
   })
 
   const [errors, setErrors] = useState({})
-  const [submissionState, setSubmissionState] = useState('idle') // 'idle' | 'preparing' | 'destination-placeholder' | 'mail-client-opened'
+  const [submissionState, setSubmissionState] = useState('idle') // 'idle' | 'submitting' | 'success' | 'error' | 'destination-placeholder' | 'mail-client-opened'
+  const [submissionError, setSubmissionError] = useState('')
   const [draftCopied, setDraftCopied] = useState(false)
 
   const validate = () => {
@@ -58,21 +60,58 @@ export default function ContactForm({ recipientEmail }) {
     }
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
 
     if (!validate()) {
       return
     }
 
-    setSubmissionState('preparing')
+    // If Formspree endpoint is configured, perform live submission
+    if (formspreeEndpoint) {
+      setSubmissionState('submitting')
+      setSubmissionError('')
 
+      try {
+        const response = await fetch(formspreeEndpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify({
+            name: formData.name.trim(),
+            email: formData.email.trim(),
+            message: formData.message.trim(),
+          }),
+        })
+
+        if (response.ok) {
+          setSubmissionState('success')
+          setFormData({ name: '', email: '', message: '' })
+        } else {
+          const data = await response.json().catch(() => ({}))
+          const errorMsg =
+            data?.errors?.map((err) => err.message).join(', ') ||
+            'Submission encountered an issue. Please try again or copy your draft.'
+          setSubmissionError(errorMsg)
+          setSubmissionState('error')
+        }
+      } catch {
+        setSubmissionError(
+          'Network connection error reaching Formspree. Please try again or copy your draft.'
+        )
+        setSubmissionState('error')
+      }
+      return
+    }
+
+    // Fallback if no Formspree endpoint is configured
+    setSubmissionState('submitting')
     setTimeout(() => {
-      // If the email address is still the placeholder, do not open an invalid mailto URL
       if (!recipientEmail || recipientEmail === 'YOUR_EMAIL_HERE') {
         setSubmissionState('destination-placeholder')
       } else {
-        // Construct safely encoded mailto URL
         const subject = `Project Inquiry from ${formData.name.trim()}`
         const body = `Name: ${formData.name.trim()}\nEmail: ${formData.email.trim()}\n\nProject / Message:\n${formData.message.trim()}`
         const mailtoUrl = `mailto:${encodeURIComponent(recipientEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
@@ -80,7 +119,7 @@ export default function ContactForm({ recipientEmail }) {
         window.location.href = mailtoUrl
         setSubmissionState('mail-client-opened')
       }
-    }, 450)
+    }, 400)
   }
 
   const handleCopyDraft = async () => {
@@ -107,7 +146,7 @@ export default function ContactForm({ recipientEmail }) {
           Start A Conversation
         </h3>
         <span className="font-mono text-[10px] text-ink-muted uppercase tracking-wider">
-          DIRECT MESSAGE
+          LIVE FORMSPREE PIPELINE
         </span>
       </div>
 
@@ -128,6 +167,7 @@ export default function ContactForm({ recipientEmail }) {
             value={formData.name}
             onChange={handleChange}
             placeholder="Jane Doe"
+            disabled={submissionState === 'submitting'}
             aria-required="true"
             aria-invalid={!!errors.name}
             aria-describedby={errors.name ? 'name-error' : undefined}
@@ -162,6 +202,7 @@ export default function ContactForm({ recipientEmail }) {
             value={formData.email}
             onChange={handleChange}
             placeholder="jane@example.com"
+            disabled={submissionState === 'submitting'}
             aria-required="true"
             aria-invalid={!!errors.email}
             aria-describedby={errors.email ? 'email-error' : undefined}
@@ -196,6 +237,7 @@ export default function ContactForm({ recipientEmail }) {
           rows={5}
           value={formData.message}
           onChange={handleChange}
+          disabled={submissionState === 'submitting'}
           placeholder="Briefly describe what you are building, the interface goals, or what kind of frontend perspective you need..."
           aria-required="true"
           aria-invalid={!!errors.message}
@@ -216,7 +258,72 @@ export default function ContactForm({ recipientEmail }) {
         )}
       </div>
 
-      {/* Honest Feedback Status Callout (When triggered) */}
+      {/* Live Formspree Success State */}
+      {submissionState === 'success' && (
+        <div
+          role="status"
+          className="flex flex-col gap-3 p-5 rounded-xl bg-accent-mint/[0.08] border border-accent-mint/30 text-xs font-mono text-ink"
+        >
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-ink uppercase tracking-wider flex items-center gap-2">
+              <Check className="w-4 h-4 text-accent-mint" />
+              MESSAGE TRANSMITTED
+            </span>
+            <span className="text-[10px] text-ink-muted uppercase">FORMSPREE // DELIVERED</span>
+          </div>
+          <p className="text-ink-secondary leading-relaxed">
+            Thank you for reaching out. Your message was successfully received via Formspree. I will review your note and reply as soon as possible.
+          </p>
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={() => setSubmissionState('idle')}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded bg-ink text-canvas text-xs font-mono font-medium hover:bg-ink/90 transition-colors"
+            >
+              <Send className="w-3 h-3" />
+              <span>SEND ANOTHER MESSAGE</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Formspree / Network Error State with Fallback Draft */}
+      {submissionState === 'error' && (
+        <div
+          role="alert"
+          className="flex flex-col gap-3 p-5 rounded-xl bg-accent-coral/[0.08] border border-accent-coral/30 text-xs font-mono text-ink"
+        >
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-accent-coral uppercase tracking-wider flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-accent-coral" />
+              TRANSMISSION ISSUE
+            </span>
+            <span className="text-[10px] text-ink-muted">SAFE FALLBACK</span>
+          </div>
+          <p className="text-ink-secondary leading-relaxed">
+            {submissionError || 'There was a problem submitting your message to Formspree. Your drafted text is preserved below:'}
+          </p>
+          <div className="pt-1 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleCopyDraft}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded bg-ink text-canvas text-xs font-mono font-medium hover:bg-ink/90 transition-colors"
+            >
+              {draftCopied ? <Check className="w-3.5 h-3.5 text-accent-mint" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{draftCopied ? 'DRAFT COPIED' : 'COPY FORMATTED DRAFT'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSubmissionState('idle')}
+              className="text-xs text-ink-muted hover:text-ink transition-colors font-mono underline underline-offset-4"
+            >
+              Try Again
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Fallback Placeholder State (When Formspree endpoint is not set) */}
       {submissionState === 'destination-placeholder' && (
         <div
           role="status"
@@ -229,7 +336,7 @@ export default function ContactForm({ recipientEmail }) {
             <span className="text-ink-muted">SAFE FALLBACK</span>
           </div>
           <p className="text-ink-secondary leading-relaxed">
-            Contact destination is currently configured with placeholder{' '}
+            Destination is configured with placeholder{' '}
             <code className="px-1.5 py-0.5 rounded bg-canvas-card border border-border-subtle font-mono text-ink">
               YOUR_EMAIL_HERE
             </code>
@@ -241,17 +348,8 @@ export default function ContactForm({ recipientEmail }) {
               onClick={handleCopyDraft}
               className="inline-flex items-center gap-2 px-3 py-1.5 rounded bg-ink text-canvas text-xs font-mono font-medium hover:bg-ink/90 transition-colors"
             >
-              {draftCopied ? (
-                <>
-                  <Check className="w-3.5 h-3.5 text-accent-mint" />
-                  <span>DRAFT COPIED</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>COPY FORMATTED DRAFT</span>
-                </>
-              )}
+              {draftCopied ? <Check className="w-3.5 h-3.5 text-accent-mint" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{draftCopied ? 'DRAFT COPIED' : 'COPY FORMATTED DRAFT'}</span>
             </button>
             <button
               type="button"
@@ -264,49 +362,19 @@ export default function ContactForm({ recipientEmail }) {
         </div>
       )}
 
-      {submissionState === 'mail-client-opened' && (
-        <div
-          role="status"
-          className="flex flex-col gap-2 p-4 rounded-xl bg-accent-mint/[0.08] border border-accent-mint/30 text-xs font-mono text-ink"
-        >
-          <div className="flex items-center justify-between">
-            <span className="font-semibold text-ink uppercase tracking-wider">
-              YOUR MAIL CLIENT SHOULD OPEN
-            </span>
-            <Check className="w-4 h-4 text-accent-mint" />
-          </div>
-          <p className="text-ink-secondary leading-relaxed">
-            A message draft has been dispatched to your system&apos;s default mail application. If your client did not open automatically, you can copy the drafted message:
-          </p>
-          <div className="pt-2 flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleCopyDraft}
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded bg-ink text-canvas text-xs font-mono font-medium hover:bg-ink/90 transition-colors"
-            >
-              {draftCopied ? <Check className="w-3.5 h-3.5 text-accent-mint" /> : <Copy className="w-3.5 h-3.5" />}
-              <span>{draftCopied ? 'COPIED TO CLIPBOARD' : 'COPY DRAFT CONTENT'}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setSubmissionState('idle')}
-              className="text-xs text-ink-muted hover:text-ink transition-colors font-mono underline underline-offset-4"
-            >
-              Edit Form
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Primary Submit Action */}
       <div className="pt-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <button
           type="submit"
-          disabled={submissionState === 'preparing'}
-          className="group inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-lg bg-ink text-canvas text-xs font-mono font-semibold uppercase tracking-wider transition-all duration-200 hover:bg-ink/90 active:scale-[0.98] min-h-[44px] shadow-xs cursor-pointer"
+          disabled={submissionState === 'submitting'}
+          className="group inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-lg bg-ink text-canvas text-xs font-mono font-semibold uppercase tracking-wider transition-all duration-200 hover:bg-ink/90 active:scale-[0.98] min-h-[44px] shadow-xs cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
         >
           <span>
-            {submissionState === 'preparing' ? 'PREPARING MESSAGE…' : 'SEND MESSAGE'}
+            {submissionState === 'submitting'
+              ? 'TRANSMITTING MESSAGE…'
+              : submissionState === 'success'
+              ? 'MESSAGE TRANSMITTED'
+              : 'SEND MESSAGE'}
           </span>
           <ArrowUpRight
             className="w-4 h-4 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
@@ -315,7 +383,7 @@ export default function ContactForm({ recipientEmail }) {
         </button>
 
         <span className="text-[11px] font-mono text-ink-muted">
-          Lightweight &bull; Direct inquiry &bull; No marketing tracking
+          Formspree &bull; Direct inbox delivery &bull; No marketing tracking
         </span>
       </div>
     </form>
